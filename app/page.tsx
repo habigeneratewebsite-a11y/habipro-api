@@ -1,133 +1,147 @@
 'use client';
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 
 export default function HabiAPI() {
   const [lyrics, setLyrics] = useState('');
   const [model, setModel] = useState('v3.5');
-  const [styleWeight, setStyleWeight] = useState(0.5);
-  const [apiKey, setApiKey] = useState(''); // State untuk API Key Manual
+  const [apiKey, setApiKey] = useState('');
   const [loading, setLoading] = useState(false);
   const [status, setStatus] = useState('');
+  const [credit, setCredit] = useState(null);
+  const [songUrl, setSongUrl] = useState(null);
+
+  // Fungsi untuk cek saldo otomatis saat API Key diisi
+  const checkBalance = async (key: string) => {
+    if (!key) return;
+    try {
+      const res = await fetch('/api/user-info', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ userKey: key }),
+      });
+      const data = await res.json();
+      if (data.credit !== undefined) setCredit(data.credit);
+    } catch (e) { console.error("Gagal ambil saldo"); }
+  };
 
   const handleGenerate = async () => {
-    if (!apiKey) {
-      alert("Masukkan API Key Suno Anda terlebih dahulu!");
-      return;
-    }
+    if (!apiKey) return alert("Masukkan API Key!");
     setLoading(true);
-    setStatus('Mengirim perintah ke Suno...');
+    setStatus('Memulai proses generate...');
+    setSongUrl(null);
 
     try {
       const res = await fetch('/api/music', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ 
-          prompt: lyrics, 
-          model: model,
-          userKey: apiKey // Mengirim key dari user ke backend
-        }),
+        body: JSON.stringify({ prompt: lyrics, model, userKey: apiKey }),
       });
       const data = await res.json();
-      setStatus('Lagu sedang diproses, cek library Suno Anda.');
-      console.log(data);
+      
+      if (data.task_id || data.id) {
+        const id = data.task_id || data.id;
+        startPolling(id);
+      } else {
+        setStatus('Error: ' + (data.message || 'Gagal memulai tugas'));
+        setLoading(false);
+      }
     } catch (e) {
-      setStatus('Gagal terhubung ke API.');
-    } finally {
+      setStatus('Koneksi terputus.');
       setLoading(false);
     }
   };
 
+  // SISTEM POLLING (Cek setiap 5 detik)
+  const startPolling = (taskId: string) => {
+    setStatus('Lagu sedang dibuat (0%)...');
+    const interval = setInterval(async () => {
+      try {
+        const res = await fetch(`/api/music?taskId=${taskId}&userKey=${apiKey}`);
+        const data = await res.json();
+        
+        if (data.status === 'completed' || data.data?.status === 'completed') {
+          const url = data.audio_url || data.data?.audio_url;
+          setSongUrl(url);
+          setStatus('Selesai!');
+          setLoading(false);
+          checkBalance(apiKey); // Update saldo setelah potong
+          clearInterval(interval);
+        } else {
+          setStatus('Sedang memproses musik... Mohon tunggu.');
+        }
+      } catch (e) {
+        clearInterval(interval);
+        setLoading(false);
+      }
+    }, 5000);
+  };
+
   return (
-    <div className="min-h-screen bg-slate-50 text-slate-900 font-sans">
-      {/* Header Ala KIE API */}
-      <header className="bg-white border-b p-4 flex justify-between items-center sticky top-0 z-50">
+    <div className="min-h-screen bg-slate-50 text-slate-900 pb-20">
+      <header className="bg-white border-b p-4 flex justify-between items-center sticky top-0 z-50 shadow-sm">
         <div className="flex items-center gap-2">
-          <div className="bg-blue-600 text-white w-8 h-8 rounded-lg flex items-center justify-center font-bold shadow-sm">H</div>
-          <span className="font-black text-xl tracking-tighter">HABI API</span>
+          <div className="bg-blue-600 text-white w-8 h-8 rounded-lg flex items-center justify-center font-bold">H</div>
+          <span className="font-black text-xl tracking-tighter uppercase">Habi API</span>
         </div>
-        <div className="flex items-center gap-3">
-          <div className="hidden md:block text-[10px] font-bold text-slate-400 uppercase tracking-widest">Tools Only</div>
-          <div className="w-8 h-8 bg-slate-200 rounded-full border border-slate-300" />
+        <div className="flex items-center gap-2">
+          {credit !== null && (
+            <span className="text-[10px] font-bold bg-blue-50 text-blue-600 px-3 py-1.5 rounded-full border border-blue-100">
+              {credit} Credits
+            </span>
+          )}
+          <div className="w-8 h-8 bg-slate-200 rounded-full border" />
         </div>
       </header>
 
       <main className="max-w-xl mx-auto p-4 space-y-6">
-        {/* Kontainer Input Utama */}
-        <div className="bg-white border border-slate-200 rounded-2xl p-6 shadow-sm space-y-6">
-          <div className="flex justify-between items-center">
-            <h2 className="font-bold text-sm uppercase tracking-wider text-slate-500">Input Music Parameter</h2>
-            <div className="flex bg-slate-100 rounded-lg p-1 text-[10px] font-bold">
-              <span className="bg-white px-3 py-1 rounded-md shadow-sm text-blue-600">FORM</span>
-              <span className="px-3 py-1 text-slate-400">JSON</span>
-            </div>
-          </div>
-
-          {/* Kolom API KEY MANUAL */}
-          <div className="space-y-1.5 p-3 bg-yellow-50 border border-yellow-100 rounded-xl">
-            <label className="text-[10px] font-black text-yellow-700 uppercase">Suno API Key (Manual) *</label>
+        <div className="bg-white border border-slate-200 rounded-2xl p-6 shadow-sm space-y-6 mt-4">
+          <div className="space-y-1.5 p-4 bg-blue-50 border border-blue-100 rounded-xl">
+            <label className="text-[10px] font-black text-blue-700 uppercase">Suno API Key (Manual)</label>
             <input 
-              type="password"
-              className="w-full bg-white border border-yellow-200 rounded-lg p-2.5 text-sm focus:ring-2 focus:ring-yellow-400 outline-none"
-              placeholder="Paste your Suno API Key here..."
+              type="password" 
+              className="w-full bg-white border border-blue-200 rounded-lg p-2 text-sm outline-none"
+              placeholder="Paste your key..."
               value={apiKey}
               onChange={(e) => setApiKey(e.target.value)}
+              onBlur={() => checkBalance(apiKey)}
             />
           </div>
 
-          <div className="space-y-1.5">
-            <label className="text-[10px] font-black text-slate-500 uppercase">Model Selection</label>
-            <select 
-              className="w-full bg-slate-50 border border-slate-200 rounded-xl p-3 text-sm font-medium outline-none focus:border-blue-500" 
-              value={model} 
-              onChange={(e) => setModel(e.target.value)}
-            >
-              <option value="v3.5">Suno V3.5 (Balanced)</option>
-              <option value="v4">Suno V4 (High Quality)</option>
-            </select>
-          </div>
-
-          <div className="space-y-1.5">
-            <label className="text-[10px] font-black text-slate-500 uppercase">Lyrics / Style Prompt *</label>
-            <textarea 
-              className="w-full bg-slate-50 border border-slate-200 rounded-xl p-4 text-sm h-40 focus:ring-2 focus:ring-blue-500 outline-none transition-all" 
-              placeholder="e.g. A happy pop song about coding in the morning..."
-              value={lyrics}
-              onChange={(e) => setLyrics(e.target.value)}
-            />
-          </div>
-
-          {/* Sliders Ala KIE API */}
-          <div className="space-y-4 py-2">
-            <div className="flex justify-between items-center">
-              <label className="text-[10px] font-black text-slate-500 uppercase">Style Weight</label>
-              <span className="text-xs font-mono bg-blue-50 text-blue-600 px-2 py-0.5 rounded-md border border-blue-100">{styleWeight}</span>
+          <div className="space-y-4">
+            <div>
+              <label className="text-[10px] font-black text-slate-500 uppercase">Lyrics / Prompt</label>
+              <textarea 
+                className="w-full bg-slate-50 border border-slate-200 rounded-xl p-4 text-sm h-32 outline-none focus:ring-2 focus:ring-blue-500"
+                value={lyrics}
+                onChange={(e) => setLyrics(e.target.value)}
+                placeholder="Tulis lirik atau gaya musik (contoh: Dangdut Koplo)"
+              />
             </div>
-            <input 
-              type="range" min="0" max="1" step="0.1" 
-              className="w-full h-1.5 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-blue-600"
-              value={styleWeight}
-              onChange={(e) => setStyleWeight(parseFloat(e.target.value))}
-            />
+            
+            <button 
+              onClick={handleGenerate}
+              disabled={loading}
+              className="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-4 rounded-2xl shadow-lg active:scale-95 transition-all disabled:bg-slate-300"
+            >
+              {loading ? 'PROSES GENERATE...' : 'GENERATE MUSIC ⚡'}
+            </button>
+            <p className="text-[10px] text-center text-slate-400 font-bold uppercase">{status}</p>
           </div>
-
-          <button 
-            onClick={handleGenerate}
-            disabled={loading}
-            className={`w-full ${loading ? 'bg-slate-400' : 'bg-blue-600 hover:bg-blue-700'} text-white font-bold py-4 rounded-2xl shadow-lg shadow-blue-200 active:scale-95 transition-all flex justify-center items-center gap-2`}
-          >
-            {loading ? 'Processing...' : 'Generate Music ⚡'}
-          </button>
-          
-          {status && <p className="text-[10px] text-center font-medium text-slate-400 uppercase tracking-tighter">{status}</p>}
         </div>
 
-        {/* Output Area */}
+        {/* OUTPUT AREA */}
         <div className="bg-white border border-slate-200 rounded-2xl p-6 shadow-sm">
-          <h2 className="font-bold text-sm uppercase tracking-wider text-slate-500 mb-4">Output Preview</h2>
-          <div className="h-40 flex flex-col items-center justify-center border-2 border-dashed border-slate-100 rounded-xl text-slate-400 text-xs space-y-2">
-             <div className="w-10 h-10 bg-slate-50 rounded-full flex items-center justify-center text-lg">🎵</div>
-             <p>Lagu akan muncul di Library Suno Anda</p>
-          </div>
+          <h2 className="font-bold text-sm uppercase text-slate-500 mb-4">Output Result</h2>
+          {songUrl ? (
+            <div className="space-y-4">
+              <audio src={songUrl} controls className="w-full" />
+              <a href={songUrl} target="_blank" className="block text-center text-xs font-bold text-blue-600 underline">Download MP3</a>
+            </div>
+          ) : (
+            <div className="h-32 border-2 border-dashed rounded-xl flex items-center justify-center text-slate-400 text-xs">
+              Hasil lagu akan muncul otomatis di sini
+            </div>
+          )}
         </div>
       </main>
     </div>
